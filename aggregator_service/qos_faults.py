@@ -27,9 +27,11 @@ class FaultProfile:
         # SERVICE_VARIANT identifica la alternativa, pero no contiene limites.
         self.variant=os.getenv('SERVICE_VARIANT', DEFAULT_VARIANT)
         self.limits=STATIC_LIMITS_BY_VARIANT.get(self.variant, STATIC_LIMITS_BY_VARIANT[DEFAULT_VARIANT])
-        self.low=30.0
-        self.high=55.0
-        self.probability=0.35
+        # Una oportunidad de fallo cada 4-8 minutos por CONTENEDOR.
+        self.low=240.0
+        self.high=480.0
+        # Solo un 6 % de las oportunidades crea una degradación.
+        self.probability=0.06
         self.next_at=time.monotonic()+self.rng.uniform(self.low,self.high)
         self.expires_at=0.0
         self.values={}
@@ -60,7 +62,7 @@ class FaultProfile:
                         self.values[key]=round(float(rule['max'])*self.rng.uniform(1.7,2.2)+.001,3)
                     else:
                         self.values[key]=round(float(rule['min'])*self.rng.uniform(.18,.45),3)
-                    self.expires_at=now+self.rng.uniform(16,24)
+                    self.expires_at=now+self.rng.uniform(12,20)
                 self.next_at=now+self.rng.uniform(self.low,self.high)
             slot=int(now/2)
             if slot!=self.last_slot:
@@ -72,6 +74,10 @@ class FaultProfile:
                 v=out.get(k)
                 if type(v) in (int,float):
                     multiplier=(1/factor if k=='availability' else factor)
-                    out[k]=round(max(0.,v*self.jitter[k]*multiplier),3)
+                    # No aplicar ruido a métricas con REQ: podría crear falsas
+                    # infracciones aunque no haya fallado nada (ej. sensor-2).
+                    # Una medida realmente fuera de límites se conserva intacta.
+                    if k not in self.limits:
+                        out[k]=round(max(0.,v*self.jitter[k]*multiplier),3)
             out.update(self.values)
             return out
